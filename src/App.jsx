@@ -2,7 +2,27 @@ import React, { useState } from 'react'
 import { Plus, Trash2, Download, Search, AlertCircle, Loader2, X, Settings } from 'lucide-react'
 import { cn } from './lib/utils'
 
-const BASE_URL = '/api/feeds/{PRODUCT_FEED_ID}?tk=8490e6bcea9089cf9eb38bedfaae39f20d6b76b953f60f41db974ee0866cdeb7&x-cc=US&debug=true&segment=true'
+// Environment configurations
+const ENVIRONMENTS = {
+  android: {
+    name: 'Android',
+    domain: 'https://ape-androids.isappcloud.com',
+    proxyPath: '/api-android',
+    token: '8490e6bcea9089cf9eb38bedfaae39f20d6b76b953f60f41db974ee0866cdeb7'
+  },
+  hutch: {
+    name: 'Hutch',
+    domain: 'https://ape-hutch.isappcloud.com',
+    proxyPath: '/api-hutch',
+    token: '5d46d76603b11f820e2aa2fc6815c9cf7b15c62354dc3004e6e2b730c4a7fa0d'
+  },
+  sprint: {
+    name: 'Sprint',
+    domain: 'https://ape-sprint.isappcloud.com',
+    proxyPath: '/api-sprint',
+    token: '277f99dae24a27a21abf1d1fd7c0637d4b47f3101898ec481970bf5d1c68a58b'
+  }
+}
 
 const LOCALES = {
   "en": "English", "es": "Spanish", "fr": "French", "de": "German",
@@ -22,6 +42,7 @@ const FEATURES = [
 ]
 
 function App() {
+  const [selectedEnvironment, setSelectedEnvironment] = useState('android')
   const [feeds, setFeeds] = useState([])
   const [newFeedId, setNewFeedId] = useState('')
   const [newFeedLabel, setNewFeedLabel] = useState('')
@@ -51,13 +72,22 @@ function App() {
   const [showCdConfig, setShowCdConfig] = useState(false)
   const [showDebug, setShowDebug] = useState(false)
   const [debugInfo, setDebugInfo] = useState([])
+  
+  // CD Local Iteration Loop
+  const [isLoopRunning, setIsLoopRunning] = useState(false)
+  const [loopResults, setLoopResults] = useState([])
+  const [showLoopResults, setShowLoopResults] = useState(false)
 
   // Build URL with CD parameters
   const buildFeedUrl = (feedId, cdParams = {}) => {
+    const env = ENVIRONMENTS[selectedEnvironment]
+    
     console.log('Building URL for Feed ID:', feedId)
+    console.log('Environment:', env.name)
     console.log('CD Params:', cdParams)
     
-    let url = BASE_URL.replace('{PRODUCT_FEED_ID}', feedId)
+    // Build the URL path using the proxy path
+    let url = `${env.proxyPath}/feeds/${feedId}?tk=${env.token}&x-cc=US&debug=true&segment=true`
     
     // Build CD object only with non-empty values
     const cd = {}
@@ -74,8 +104,8 @@ function App() {
     
     console.log('CD String:', cdString)
     console.log('Encoded CD:', encoded)
-    console.log('Final Built URL:', url)
-    console.log('Full URL with domain:', 'https://ape-androids.isappcloud.com' + url.replace('/api', ''))
+    console.log('Proxy URL:', url)
+    console.log('Will proxy to:', env.domain + url.replace(env.proxyPath, ''))
     return url
   }
 
@@ -128,8 +158,9 @@ function App() {
   }
 
   const fetchFeed = async (feed) => {
+    const env = ENVIRONMENTS[selectedEnvironment]
     const url = buildFeedUrl(feed.feedId, feed.cdParams || {})
-    const fullUrl = 'https://ape-androids.isappcloud.com' + url.replace('/api', '')
+    const fullUrl = env.domain + url.replace(env.proxyPath, '')
     const timestamp = new Date().toLocaleTimeString()
     
     // Add to debug info
@@ -149,7 +180,8 @@ function App() {
     ))
 
     try {
-      console.log(`Fetching feed ${feed.feedId} from:`, url)
+      console.log(`Fetching feed ${feed.feedId} from proxy:`, url)
+      console.log(`Will be proxied to:`, fullUrl)
       const response = await fetch(url)
       
       // Update debug with response
@@ -380,6 +412,212 @@ function App() {
     }
   }
 
+  // CD Local Iteration Loop - Test all locales automatically
+  const runLocalIterationLoop = async () => {
+    // Validation: Need at least 2 feeds
+    if (feeds.length < 2) {
+      alert('⚠️ Please add at least 2 feeds to run the Local Iteration Loop.')
+      return
+    }
+
+    setIsLoopRunning(true)
+    setLoopResults([])
+    setShowLoopResults(true)
+    const results = []
+
+    // Get the first 2 feeds
+    const feed1 = feeds[0]
+    const feed2 = feeds[1]
+
+    console.log('Starting CD Local Iteration Loop...')
+    console.log(`Testing ${Object.keys(LOCALES).length} locales`)
+    console.log(`Feed 1: ${feed1.feedId} (${feed1.label})`)
+    console.log(`Feed 2: ${feed2.feedId} (${feed2.label})`)
+
+    // Iterate through all locales
+    for (const [localeCode, localeName] of Object.entries(LOCALES)) {
+      console.log(`\n--- Testing locale: ${localeName} (${localeCode}) ---`)
+      
+      try {
+        // Update CD parameters for both feeds with current locale
+        const updatedFeed1 = {
+          ...feed1,
+          cdParams: { ...feed1.cdParams, l: localeCode }
+        }
+        const updatedFeed2 = {
+          ...feed2,
+          cdParams: { ...feed2.cdParams, l: localeCode }
+        }
+
+        // Fetch both feeds with the new locale
+        const [data1, data2] = await Promise.all([
+          fetchFeedData(updatedFeed1),
+          fetchFeedData(updatedFeed2)
+        ])
+
+        // Compare the feeds
+        const localeDiffs = compareFeedsData([
+          { ...updatedFeed1, data: data1 },
+          { ...updatedFeed2, data: data2 }
+        ])
+
+        // Store results
+        const result = {
+          locale: localeCode,
+          localeName: localeName,
+          differencesCount: localeDiffs.length,
+          differences: localeDiffs,
+          success: true
+        }
+        results.push(result)
+        
+        // Update UI with current progress
+        setLoopResults([...results])
+
+        console.log(`✓ ${localeName}: ${localeDiffs.length} differences found`)
+      } catch (error) {
+        console.error(`✗ ${localeName}: Error - ${error.message}`)
+        const result = {
+          locale: localeCode,
+          localeName: localeName,
+          error: error.message,
+          success: false
+        }
+        results.push(result)
+        
+        // Update UI with current progress
+        setLoopResults([...results])
+      }
+    }
+
+    setLoopResults(results)
+    setShowLoopResults(true)
+    setIsLoopRunning(false)
+    console.log('\n=== CD Local Iteration Loop Complete ===')
+    console.log(`Total locales tested: ${results.length}`)
+    console.log(`Successful: ${results.filter(r => r.success).length}`)
+    console.log(`Errors: ${results.filter(r => !r.success).length}`)
+  }
+
+  // Helper: Fetch feed data and return the data object
+  const fetchFeedData = async (feed) => {
+    const url = buildFeedUrl(feed.feedId, feed.cdParams || {})
+    
+    const response = await fetch(url)
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status} - ${response.statusText}`)
+    }
+    
+    return await response.json()
+  }
+
+  // Helper: Compare feeds data (similar to compareFeeds but returns diffs)
+  const compareFeedsData = (feedsWithData) => {
+    const diffs = []
+
+    const feedsArrays = feedsWithData.map(feed => ({
+      label: feed.label,
+      productFeedId: feed.id,
+      feedsArray: feed.data.feeds || []
+    }))
+
+    // Step 0: Compare top-level properties
+    const topLevelProperties = feedsWithData.map(feed => ({
+      label: feed.label,
+      properties: feed.data.properties || {}
+    }))
+
+    if (topLevelProperties.length > 0 && Object.keys(topLevelProperties[0].properties).length > 0) {
+      const allTopKeys = new Set()
+      topLevelProperties.forEach(feed => {
+        Object.keys(feed.properties).forEach(key => allTopKeys.add(key))
+      })
+
+      allTopKeys.forEach(key => {
+        if (key === 'screenFeedsConfig') return
+
+        const values = topLevelProperties.map(feed => ({
+          label: feed.label,
+          value: feed.properties[key],
+          exists: key in feed.properties
+        }))
+
+        const allExist = values.every(v => v.exists)
+        const allSame = allExist && values.every(v => 
+          JSON.stringify(v.value) === JSON.stringify(values[0].value)
+        )
+
+        if (!allSame) {
+          diffs.push({
+            key: `[Product Feed] ${key}`,
+            propertyKey: key,
+            values: values,
+            type: !allExist ? 'missing' : 'different',
+            isTopLevel: true
+          })
+        }
+      })
+    }
+
+    // Step 2: Compare properties for feeds that exist in ALL product feeds
+    const allFeedIds = new Set()
+    feedsArrays.forEach(productFeed => {
+      productFeed.feedsArray.forEach(innerFeed => {
+        allFeedIds.add(innerFeed.id)
+      })
+    })
+
+    allFeedIds.forEach(feedId => {
+      const feedsData = feedsArrays.map(productFeed => {
+        const foundFeed = productFeed.feedsArray.find(f => f.id === feedId)
+        return {
+          productFeedLabel: productFeed.label,
+          exists: !!foundFeed,
+          feed: foundFeed,
+          index: foundFeed ? productFeed.feedsArray.findIndex(f => f.id === feedId) : -1
+        }
+      })
+
+      const allExist = feedsData.every(f => f.exists)
+
+      if (allExist) {
+        const allPropertiesKeys = new Set()
+        
+        feedsData.forEach(f => {
+          Object.keys(f.feed.properties || {}).forEach(key => allPropertiesKeys.add(key))
+        })
+
+        allPropertiesKeys.forEach(propKey => {
+          const propValues = feedsData.map(f => ({
+            label: f.productFeedLabel,
+            value: f.feed.properties?.[propKey],
+            exists: propKey in (f.feed.properties || {}),
+            feedIndex: f.index
+          }))
+
+          const allPropExist = propValues.every(v => v.exists)
+          const allPropSame = allPropExist && propValues.every(v => 
+            JSON.stringify(v.value) === JSON.stringify(propValues[0].value)
+          )
+
+          if (!allPropSame) {
+            diffs.push({
+              key: `Feed #${propValues[0].feedIndex + 1} (${feedId}) → ${propKey}`,
+              feedId: feedId,
+              propertyKey: propKey,
+              feedIndex: propValues[0].feedIndex,
+              values: propValues,
+              type: !allPropExist ? 'missing' : 'different',
+              isFeedProperty: true
+            })
+          }
+        })
+      }
+    })
+
+    return diffs
+  }
+
   // Check if value is an image URL
   const isImageUrl = (value) => {
     if (typeof value !== 'string') return false
@@ -567,6 +805,34 @@ function App() {
           </div>
           <p className="text-gray-600 text-sm">
             Compare and analyze differences between product feed configurations
+          </p>
+        </div>
+
+        {/* Environment Selector */}
+        <div className="bg-white rounded-lg shadow-lg p-6 mb-6 border-l-4 border-purple-600">
+          <h2 className="text-lg font-semibold mb-4 text-gray-800 flex items-center gap-2">
+            <span className="text-xl">🌍</span>
+            Environment
+          </h2>
+          <div className="flex gap-3">
+            {Object.entries(ENVIRONMENTS).map(([key, env]) => (
+              <button
+                key={key}
+                onClick={() => setSelectedEnvironment(key)}
+                className={cn(
+                  "px-6 py-3 rounded-lg font-medium transition-all",
+                  selectedEnvironment === key
+                    ? "bg-purple-600 text-white shadow-lg"
+                    : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                )}
+              >
+                {env.name}
+              </button>
+            ))}
+          </div>
+          <p className="text-sm text-gray-600 mt-3">
+            Selected: <span className="font-semibold text-purple-700">{ENVIRONMENTS[selectedEnvironment].name}</span>
+            {' '}({ENVIRONMENTS[selectedEnvironment].domain})
           </p>
         </div>
 
@@ -853,14 +1119,35 @@ function App() {
             </div>
 
             {feeds.filter(f => f.data && !f.error).length >= 2 && (
-              <button
-                onClick={compareFeeds}
-                className="mt-4 w-full px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-semibold text-base shadow-lg"
-              >
-                <span className="flex items-center justify-center gap-2">
-                  🔍 Compare Feeds & Show Differences
-                </span>
-              </button>
+              <div className="mt-4 space-y-3">
+                <button
+                  onClick={compareFeeds}
+                  className="w-full px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors font-semibold text-base shadow-lg"
+                >
+                  <span className="flex items-center justify-center gap-2">
+                    🔍 Compare Feeds & Show Differences
+                  </span>
+                </button>
+                
+                <button
+                  onClick={runLocalIterationLoop}
+                  disabled={isLoopRunning}
+                  className="w-full px-6 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-semibold text-base shadow-lg disabled:bg-gray-400 disabled:cursor-not-allowed"
+                >
+                  <span className="flex items-center justify-center gap-2">
+                    {isLoopRunning ? (
+                      <>
+                        <Loader2 size={20} className="animate-spin" />
+                        Running Loop... ({loopResults.length}/{Object.keys(LOCALES).length})
+                      </>
+                    ) : (
+                      <>
+                        🌐 CD Local Iteration Loop
+                      </>
+                    )}
+                  </span>
+                </button>
+              </div>
             )}
           </div>
         )}
@@ -968,6 +1255,136 @@ function App() {
                 ))}
               </div>
             )}
+          </div>
+        )}
+
+        {/* CD Local Iteration Loop Results */}
+        {showLoopResults && loopResults.length > 0 && (
+          <div className="bg-white rounded-lg shadow-xl p-6 mb-6">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-semibold text-gray-800 flex items-center gap-2">
+                <span className="text-2xl">🌐</span>
+                <span>CD Local Iteration Loop Results</span>
+              </h2>
+              <button
+                onClick={() => setShowLoopResults(false)}
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                title="Close Results"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="mb-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
+              <h3 className="font-semibold text-blue-900 mb-2">Summary</h3>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                <div>
+                  <span className="text-gray-600">Total Locales Tested:</span>
+                  <span className="ml-2 font-bold text-blue-900">{loopResults.length}</span>
+                </div>
+                <div>
+                  <span className="text-gray-600">Successful:</span>
+                  <span className="ml-2 font-bold text-green-600">{loopResults.filter(r => r.success).length}</span>
+                </div>
+                <div>
+                  <span className="text-gray-600">Errors:</span>
+                  <span className="ml-2 font-bold text-red-600">{loopResults.filter(r => !r.success).length}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-3 max-h-[600px] overflow-y-auto">
+              {loopResults.map((result, index) => (
+                <div
+                  key={index}
+                  className={cn(
+                    "border rounded-lg p-4",
+                    result.success 
+                      ? result.differencesCount === 0 
+                        ? "border-green-300 bg-green-50" 
+                        : "border-yellow-300 bg-yellow-50"
+                      : "border-red-300 bg-red-50"
+                  )}
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-3">
+                      <span className="text-lg font-bold text-gray-800">
+                        {result.localeName}
+                      </span>
+                      <code className="text-xs bg-white px-2 py-1 rounded border">
+                        {result.locale}
+                      </code>
+                    </div>
+                    <div>
+                      {result.success ? (
+                        result.differencesCount === 0 ? (
+                          <span className="inline-flex items-center gap-1 px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm font-medium">
+                            ✅ Identical
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-3 py-1 bg-yellow-100 text-yellow-700 rounded-full text-sm font-medium">
+                            ⚠️ {result.differencesCount} Difference{result.differencesCount !== 1 ? 's' : ''}
+                          </span>
+                        )
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-3 py-1 bg-red-100 text-red-700 rounded-full text-sm font-medium">
+                          ❌ Error
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {!result.success && result.error && (
+                    <div className="mt-2 p-3 bg-red-100 rounded text-sm text-red-800">
+                      <span className="font-semibold">Error:</span> {result.error}
+                    </div>
+                  )}
+
+                  {result.success && result.differencesCount > 0 && (
+                    <details className="mt-3">
+                      <summary className="cursor-pointer text-sm font-medium text-gray-700 hover:text-gray-900">
+                        Show {result.differencesCount} difference{result.differencesCount !== 1 ? 's' : ''}
+                      </summary>
+                      <div className="mt-3 space-y-3">
+                        {result.differences.slice(0, 10).map((diff, diffIndex) => (
+                          <div key={diffIndex} className="border border-gray-200 rounded-lg p-3 bg-white">
+                            <div className="font-mono text-xs font-semibold text-gray-700 mb-2 pb-2 border-b">
+                              {diff.key}
+                            </div>
+                            <div className="grid grid-cols-2 gap-3 text-xs">
+                              {diff.values && diff.values.map((val, valIndex) => (
+                                <div key={valIndex} className={cn(
+                                  "p-2 rounded border",
+                                  !val.exists ? "bg-red-50 border-red-200" : 
+                                  diff.type === 'different' ? "bg-yellow-50 border-yellow-200" : 
+                                  "bg-gray-50 border-gray-200"
+                                )}>
+                                  <div className="font-medium text-gray-600 mb-1">
+                                    {val.label}
+                                  </div>
+                                  {val.exists ? (
+                                    <div className="text-gray-800">
+                                      {renderValue(val.value, diff.propertyKey || diff.key)}
+                                    </div>
+                                  ) : (
+                                    <span className="text-red-600 font-semibold">❌ Missing</span>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                        {result.differencesCount > 10 && (
+                          <div className="text-xs text-gray-500 italic text-center p-2 bg-gray-50 rounded">
+                            ... and {result.differencesCount - 10} more difference{result.differencesCount - 10 !== 1 ? 's' : ''}
+                          </div>
+                        )}
+                      </div>
+                    </details>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
         )}
 

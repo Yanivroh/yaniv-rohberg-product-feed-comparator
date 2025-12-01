@@ -54,8 +54,6 @@ function App() {
   // CD Parameters for new feed
   const [newFeedCdParams, setNewFeedCdParams] = useState({
     l: '',      // locale
-    sis: '',    // boolean
-    rt: '',     // boolean
     af: '',     // feature
     src: ''     // source
   })
@@ -64,8 +62,6 @@ function App() {
   const [cdConfigFeed, setCdConfigFeed] = useState(null) // Feed ID being edited
   const [editCdParams, setEditCdParams] = useState({
     l: '',
-    sis: '',
-    rt: '',
     af: '',
     src: ''
   })
@@ -92,8 +88,6 @@ function App() {
     // Build CD object only with non-empty values
     const cd = {}
     if (cdParams.l) cd.l = cdParams.l
-    if (cdParams.sis !== '') cd.sis = cdParams.sis === 'true'
-    if (cdParams.rt !== '') cd.rt = cdParams.rt === 'true'
     if (cdParams.af) cd.af = cdParams.af
     if (cdParams.src) cd.src = cdParams.src
     
@@ -848,7 +842,7 @@ function App() {
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-semibold text-gray-800 flex items-center gap-2">
                 <Settings size={16} className="text-purple-600" />
-                Context Data (CD) Parameters
+                CD Parameters
                 <span className="text-xs font-normal text-gray-500">(Optional for this feed)</span>
                 {Object.values(newFeedCdParams).some(v => v !== '') && (
                   <span className="ml-2 px-2 py-1 bg-purple-600 text-white text-xs rounded-full">
@@ -918,38 +912,6 @@ function App() {
                       className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
                     />
                   </div>
-
-                  {/* SIS */}
-                  <div>
-                    <label className="block text-xs font-medium text-gray-700 mb-1">
-                      SIS (sis)
-                    </label>
-                    <select
-                      value={newFeedCdParams.sis}
-                      onChange={(e) => setNewFeedCdParams({...newFeedCdParams, sis: e.target.value})}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
-                    >
-                      <option value="">-- Default --</option>
-                      <option value="true">true</option>
-                      <option value="false">false</option>
-                    </select>
-                  </div>
-
-                  {/* RT */}
-                  <div>
-                    <label className="block text-xs font-medium text-gray-700 mb-1">
-                      RT (rt)
-                    </label>
-                    <select
-                      value={newFeedCdParams.rt}
-                      onChange={(e) => setNewFeedCdParams({...newFeedCdParams, rt: e.target.value})}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent text-sm"
-                    >
-                      <option value="">-- Default --</option>
-                      <option value="true">true</option>
-                      <option value="false">false</option>
-                    </select>
-                  </div>
                 </div>
 
                 {/* Preview */}
@@ -960,7 +922,7 @@ function App() {
                       {JSON.stringify(
                         Object.entries(newFeedCdParams).reduce((acc, [key, value]) => {
                           if (value !== '') {
-                            acc[key] = key === 'sis' || key === 'rt' ? value === 'true' : value;
+                            acc[key] = value;
                           }
                           return acc;
                         }, {}),
@@ -972,7 +934,7 @@ function App() {
                 )}
 
                 <button
-                  onClick={() => setNewFeedCdParams({l: '', sis: '', rt: '', af: '', src: ''})}
+                  onClick={() => setNewFeedCdParams({l: '', af: '', src: ''})}
                   className="text-xs text-purple-600 hover:text-purple-800 underline"
                 >
                   Reset Parameters
@@ -1082,7 +1044,7 @@ function App() {
                       <button
                         onClick={() => {
                           setCdConfigFeed(feed.id)
-                          setEditCdParams(feed.cdParams || {l: '', af: '', src: '', sis: '', rt: ''})
+                          setEditCdParams(feed.cdParams || {l: '', af: '', src: ''})
                         }}
                         className="p-2 text-purple-600 hover:bg-purple-100 rounded-lg transition-colors"
                         title="Edit CD Parameters"
@@ -1108,8 +1070,6 @@ function App() {
                           {feed.cdParams.l && <span className="px-2 py-0.5 bg-purple-100 rounded">Locale: {feed.cdParams.l}</span>}
                           {feed.cdParams.af && <span className="px-2 py-0.5 bg-purple-100 rounded">Feature: {feed.cdParams.af}</span>}
                           {feed.cdParams.src && <span className="px-2 py-0.5 bg-purple-100 rounded">Source: {feed.cdParams.src}</span>}
-                          {feed.cdParams.sis !== '' && <span className="px-2 py-0.5 bg-purple-100 rounded">SIS: {feed.cdParams.sis}</span>}
-                          {feed.cdParams.rt !== '' && <span className="px-2 py-0.5 bg-purple-100 rounded">RT: {feed.cdParams.rt}</span>}
                         </div>
                       </div>
                     )}
@@ -1650,37 +1610,6 @@ function App() {
                     />
                   </div>
 
-                  {/* SIS */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      SIS (sis)
-                    </label>
-                    <select
-                      value={editCdParams.sis}
-                      onChange={(e) => setEditCdParams({...editCdParams, sis: e.target.value})}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                    >
-                      <option value="">-- Default --</option>
-                      <option value="true">true</option>
-                      <option value="false">false</option>
-                    </select>
-                  </div>
-
-                  {/* RT */}
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      RT (rt)
-                    </label>
-                    <select
-                      value={editCdParams.rt}
-                      onChange={(e) => setEditCdParams({...editCdParams, rt: e.target.value})}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
-                    >
-                      <option value="">-- Default --</option>
-                      <option value="true">true</option>
-                      <option value="false">false</option>
-                    </select>
-                  </div>
                 </div>
 
                 {/* Preview */}
@@ -1691,7 +1620,7 @@ function App() {
                       {JSON.stringify(
                         Object.entries(editCdParams).reduce((acc, [key, value]) => {
                           if (value !== '') {
-                            acc[key] = key === 'sis' || key === 'rt' ? value === 'true' : value;
+                            acc[key] = value;
                           }
                           return acc;
                         }, {}),

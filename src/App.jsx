@@ -38,6 +38,16 @@ function App() {
     af: '',     // feature
     src: ''     // source
   })
+  
+  // CD Parameters editing dialog
+  const [cdConfigFeed, setCdConfigFeed] = useState(null) // Feed ID being edited
+  const [editCdParams, setEditCdParams] = useState({
+    l: '',
+    sis: '',
+    rt: '',
+    af: '',
+    src: ''
+  })
   const [showCdConfig, setShowCdConfig] = useState(false)
   const [showDebug, setShowDebug] = useState(false)
   const [debugInfo, setDebugInfo] = useState([])
@@ -95,6 +105,26 @@ function App() {
 
   const updateFeedLabel = (id, newLabel) => {
     setFeeds(feeds.map(f => f.id === id ? { ...f, label: newLabel } : f))
+  }
+
+  // Save CD Parameters changes and refetch the feed
+  const saveCdParametersAndRefetch = async () => {
+    if (!cdConfigFeed) return
+    
+    const feed = feeds.find(f => f.id === cdConfigFeed)
+    if (!feed) return
+    
+    // Update the feed's CD parameters
+    const updatedFeed = { ...feed, cdParams: editCdParams }
+    setFeeds(feeds.map(f => 
+      f.id === cdConfigFeed ? updatedFeed : f
+    ))
+    
+    // Close the dialog
+    setCdConfigFeed(null)
+    
+    // Refetch this specific feed
+    await fetchFeed(updatedFeed)
   }
 
   const fetchFeed = async (feed) => {
@@ -179,91 +209,7 @@ function App() {
     setLoading(false)
   }
 
-  // Parse embedded JSON strings (like screenFeedsConfig, appUnitsConfig)
-  const parseEmbeddedJSON = (value) => {
-    if (typeof value !== 'string') return value
-    
-    try {
-      return JSON.parse(value)
-    } catch {
-      return value
-    }
-  }
-
-  // Extract feed IDs and order from screenFeedsConfig
-  const extractFeedOrder = (screenFeedsConfig) => {
-    try {
-      const parsed = typeof screenFeedsConfig === 'string' 
-        ? JSON.parse(screenFeedsConfig) 
-        : screenFeedsConfig
-      
-      if (Array.isArray(parsed)) {
-        return parsed.map(screen => ({
-          screenId: screen.screenId,
-          toolbarTitleId: screen.toolbarTitleId,
-          feeds: screen.feeds || []
-        }))
-      }
-      return parsed
-    } catch {
-      return screenFeedsConfig
-    }
-  }
-
-  // Extract only feed IDs as a flat list (for focused comparison)
-  const extractFeedIDs = (screenFeedsConfig) => {
-    try {
-      const parsed = typeof screenFeedsConfig === 'string' 
-        ? JSON.parse(screenFeedsConfig) 
-        : screenFeedsConfig
-      
-      if (Array.isArray(parsed)) {
-        const feedIds = []
-        parsed.forEach(screen => {
-          if (screen.feeds && Array.isArray(screen.feeds)) {
-            feedIds.push(...screen.feeds)
-          }
-        })
-        return feedIds
-      }
-      return []
-    } catch {
-      return []
-    }
-  }
-
-  // Compare feed IDs in detail
-  const compareFeedIDs = (feedOrders) => {
-    const allFeedIds = feedOrders.map(order => extractFeedIDs(order))
-    
-    // Check if all have same length
-    const lengths = allFeedIds.map(ids => ids.length)
-    const sameLengths = lengths.every(len => len === lengths[0])
-    
-    // Check if all have same IDs in same order
-    const sameOrder = allFeedIds.every(ids => 
-      JSON.stringify(ids) === JSON.stringify(allFeedIds[0])
-    )
-    
-    // Check if all have same IDs but maybe different order
-    const sameIDs = allFeedIds.every(ids => {
-      const sorted1 = [...ids].sort()
-      const sorted0 = [...allFeedIds[0]].sort()
-      return JSON.stringify(sorted1) === JSON.stringify(sorted0)
-    })
-    
-    return {
-      sameLengths,
-      sameOrder,
-      sameIDs,
-      feedIds: allFeedIds,
-      summary: !sameOrder ? (
-        !sameIDs ? 'Completely different IDs' :
-        !sameLengths ? 'Same IDs but different count' :
-        'Same IDs but different order'
-      ) : null
-    }
-  }
+  // No longer needed - we now compare feeds array directly
 
   const compareFeeds = () => {
     console.log('compareFeeds called!')
@@ -275,68 +221,151 @@ function App() {
       return
     }
 
-    // Extract only properties from each feed
-    const propertiesFeeds = feedsWithData.map(feed => ({
-      ...feed,
-      properties: feed.data.properties || feed.data
-    }))
-    console.log('Properties feeds:', propertiesFeeds)
-
-    const allKeys = new Set()
-    propertiesFeeds.forEach(feed => {
-      Object.keys(feed.properties).forEach(key => allKeys.add(key))
-    })
-
     const diffs = []
 
-    allKeys.forEach(key => {
-      const values = propertiesFeeds.map(feed => ({
-        feedId: feed.id,
-        label: feed.label,
-        value: feed.properties[key],
-        exists: key in feed.properties
-      }))
+    // Get all feeds arrays
+    const feedsArrays = feedsWithData.map(feed => ({
+      label: feed.label,
+      productFeedId: feed.id,
+      feedsArray: feed.data.feeds || []
+    }))
 
-      const allExist = values.every(v => v.exists)
-      
-      // Special handling for JSON configs
-      let allSame = false
-      let detailedDiff = null
-      
-      if (allExist) {
-        if (key === 'screenFeedsConfig') {
-          // Compare feed order and configuration with detailed analysis
-          const feedOrders = values.map(v => v.value)
-          const feedComparison = compareFeedIDs(feedOrders)
-          allSame = feedComparison.sameOrder
-          
-          if (!allSame) {
-            detailedDiff = {
-              type: 'feedOrder',
-              feedComparison,
-              fullData: feedOrders.map(order => extractFeedOrder(order))
-            }
-          }
-        } else if (key === 'appUnitsConfig' || key === 'specialOffersAppFeedGUIDs') {
-          // Parse and compare JSON configs
-          const parsedValues = values.map(v => parseEmbeddedJSON(v.value))
-          allSame = parsedValues.every(parsed => 
-            JSON.stringify(parsed) === JSON.stringify(parsedValues[0])
-          )
-        } else {
-          // Regular comparison
-          allSame = values.every(v => 
-            JSON.stringify(v.value) === JSON.stringify(values[0].value)
-          )
+    console.log('Feeds arrays:', feedsArrays)
+
+    // Step 0: Compare top-level properties (data.properties) first
+    const topLevelProperties = feedsWithData.map(feed => ({
+      label: feed.label,
+      properties: feed.data.properties || {}
+    }))
+
+    if (topLevelProperties.length > 0 && Object.keys(topLevelProperties[0].properties).length > 0) {
+      const allTopKeys = new Set()
+      topLevelProperties.forEach(feed => {
+        Object.keys(feed.properties).forEach(key => allTopKeys.add(key))
+      })
+
+      allTopKeys.forEach(key => {
+        // Skip screenFeedsConfig - we compare feeds directly
+        if (key === 'screenFeedsConfig') return
+
+        const values = topLevelProperties.map(feed => ({
+          label: feed.label,
+          value: feed.properties[key],
+          exists: key in feed.properties
+        }))
+
+        const allExist = values.every(v => v.exists)
+        const allSame = allExist && values.every(v => 
+          JSON.stringify(v.value) === JSON.stringify(values[0].value)
+        )
+
+        if (!allSame) {
+          diffs.push({
+            key: `[Product Feed] ${key}`,
+            propertyKey: key,
+            values: values,
+            type: !allExist ? 'missing' : 'different',
+            isTopLevel: true
+          })
         }
-      }
+      })
+    }
 
-      if (!allSame) {
-        diffs.push({
-          key,
-          values,
-          type: !allExist ? 'missing' : 'different',
-          detailedDiff
+    // Step 1: Create Feeds Summary row
+    const feedsListData = feedsArrays.map(productFeed => {
+      const feedIds = productFeed.feedsArray.map(f => f.id)
+      return {
+        label: productFeed.label,
+        feedIds: feedIds,
+        count: feedIds.length
+      }
+    })
+
+    // Check if feed lists are identical
+    const firstFeedIds = feedsListData[0].feedIds
+    const allSameOrder = feedsListData.every(f => 
+      JSON.stringify(f.feedIds) === JSON.stringify(firstFeedIds)
+    )
+    const allSameIds = feedsListData.every(f => {
+      const sorted1 = [...f.feedIds].sort()
+      const sorted0 = [...firstFeedIds].sort()
+      return JSON.stringify(sorted1) === JSON.stringify(sorted0)
+    })
+    const allSameCount = feedsListData.every(f => f.count === firstFeedIds.length)
+
+    // Add summary row
+    diffs.push({
+      key: '📋 Feeds List Summary',
+      isSummary: true,
+      summaryData: {
+        feedsListData,
+        allSameOrder,
+        allSameIds,
+        allSameCount
+      },
+      values: feedsListData.map(f => ({
+        label: f.label,
+        value: f.feedIds,
+        count: f.count,
+        exists: true
+      })),
+      type: allSameOrder ? 'same' : 'different'
+    })
+
+    // Step 2: Compare properties for feeds that exist in ALL product feeds
+    const allFeedIds = new Set()
+    feedsArrays.forEach(productFeed => {
+      productFeed.feedsArray.forEach(innerFeed => {
+        allFeedIds.add(innerFeed.id)
+      })
+    })
+
+    allFeedIds.forEach(feedId => {
+      // Find this feed in each product feed
+      const feedsData = feedsArrays.map(productFeed => {
+        const foundFeed = productFeed.feedsArray.find(f => f.id === feedId)
+        return {
+          productFeedLabel: productFeed.label,
+          exists: !!foundFeed,
+          feed: foundFeed,
+          index: foundFeed ? productFeed.feedsArray.findIndex(f => f.id === feedId) : -1
+        }
+      })
+
+      const allExist = feedsData.every(f => f.exists)
+
+      // Only compare properties if feed exists in ALL product feeds
+      if (allExist) {
+        const allPropertiesKeys = new Set()
+        
+        feedsData.forEach(f => {
+          Object.keys(f.feed.properties || {}).forEach(key => allPropertiesKeys.add(key))
+        })
+
+        allPropertiesKeys.forEach(propKey => {
+          const propValues = feedsData.map(f => ({
+            label: f.productFeedLabel,
+            value: f.feed.properties?.[propKey],
+            exists: propKey in (f.feed.properties || {}),
+            feedIndex: f.index
+          }))
+
+          const allPropExist = propValues.every(v => v.exists)
+          const allPropSame = allPropExist && propValues.every(v => 
+            JSON.stringify(v.value) === JSON.stringify(propValues[0].value)
+          )
+
+          if (!allPropSame) {
+            diffs.push({
+              key: `Feed #${propValues[0].feedIndex + 1} (${feedId}) → ${propKey}`,
+              feedId: feedId,
+              propertyKey: propKey,
+              feedIndex: propValues[0].feedIndex,
+              values: propValues,
+              type: !allPropExist ? 'missing' : 'different',
+              isFeedProperty: true
+            })
+          }
         })
       }
     })
@@ -347,33 +376,129 @@ function App() {
     
     // Show success message if no differences
     if (diffs.length === 0) {
-      alert('✅ Feeds are identical! No differences found in properties.')
+      alert('✅ Feeds are identical! No differences found.')
     }
+  }
+
+  // Check if value is an image URL
+  const isImageUrl = (value) => {
+    if (typeof value !== 'string') return false
+    const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.bmp', '.ico']
+    const lowerValue = value.toLowerCase()
+    return (
+      (lowerValue.startsWith('http://') || lowerValue.startsWith('https://')) &&
+      (imageExtensions.some(ext => lowerValue.includes(ext)) || lowerValue.includes('/image'))
+    )
+  }
+
+  // Check if value is a color code
+  const isColorCode = (value, key = '') => {
+    if (typeof value !== 'string') return false
+    const lowerKey = key.toLowerCase()
+    const lowerValue = value.toLowerCase()
+    
+    // Check if key name suggests it's a color
+    const colorKeywords = ['color', 'colour', 'background', 'tint', 'fill', 'stroke']
+    const isColorKey = colorKeywords.some(keyword => lowerKey.includes(keyword))
+    
+    // Match hex colors: #RGB, #RRGGBB, #RRGGBBAA, or with leading #
+    const isHexColor = /^#?([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/.test(value)
+    
+    // If key suggests color, be more lenient; otherwise require # prefix
+    if (isColorKey && isHexColor) return true
+    return /^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/.test(value)
+  }
+  
+  // Convert hex color - handles both #RRGGBBAA and #AARRGGBB (Android) formats
+  const hexToRgba = (hex) => {
+    // Remove # if present
+    const original = hex
+    hex = hex.replace('#', '')
+    
+    if (hex.length === 8) {
+      // Check if it's Android format #AARRGGBB (alpha first)
+      // If first 2 chars are 'ff', it's likely Android format with full opacity
+      const firstTwo = hex.substring(0, 2).toLowerCase()
+      
+      if (firstTwo === 'ff') {
+        // Android format #AARRGGBB with full opacity - just use RGB
+        const rgb = hex.substring(2, 8)
+        return `#${rgb}`
+      } else {
+        // Android format #AARRGGBB with transparency
+        const a = parseInt(hex.substring(0, 2), 16) / 255
+        const r = parseInt(hex.substring(2, 4), 16)
+        const g = parseInt(hex.substring(4, 6), 16)
+        const b = parseInt(hex.substring(6, 8), 16)
+        return `rgba(${r}, ${g}, ${b}, ${a.toFixed(2)})`
+      }
+    } else if (hex.length === 6) {
+      // #RRGGBB format
+      return `#${hex}`
+    } else if (hex.length === 3) {
+      // #RGB format - expand to #RRGGBB
+      return `#${hex[0]}${hex[0]}${hex[1]}${hex[1]}${hex[2]}${hex[2]}`
+    }
+    return `#${hex}`
+  }
+
+  // Render value with image preview if it's an image URL
+  const renderValue = (value, key = '') => {
+    if (value === undefined) return <span className="text-gray-400">—</span>
+    if (value === null) return <span className="text-gray-500">null</span>
+    if (typeof value === 'boolean') return <span>{value ? 'true' : 'false'}</span>
+    
+    // Check if it's a color code
+    if (isColorCode(value, key)) {
+      const displayColor = hexToRgba(value)
+      
+      return (
+        <div className="flex items-center gap-3">
+          <div 
+            className="w-16 h-16 rounded-lg border-2 border-gray-400 shadow-md flex-shrink-0"
+            style={{ backgroundColor: displayColor }}
+            title={displayColor}
+          />
+          <span className="font-mono text-sm font-semibold">{displayColor}</span>
+        </div>
+      )
+    }
+    
+    // Check if it's an image URL
+    if (isImageUrl(value)) {
+      return (
+        <div className="space-y-2">
+          <img 
+            src={value} 
+            alt="Property" 
+            className="max-w-xs max-h-40 rounded border border-gray-300 shadow-sm"
+            onError={(e) => {
+              e.target.style.display = 'none'
+              e.target.nextSibling.style.display = 'block'
+            }}
+          />
+          <div style={{display: 'none'}} className="text-red-500 text-xs">❌ Failed to load image</div>
+          <a 
+            href={value} 
+            target="_blank" 
+            rel="noopener noreferrer"
+            className="text-blue-600 hover:text-blue-800 underline text-xs font-mono break-all block"
+          >
+            🔗 {value}
+          </a>
+        </div>
+      )
+    }
+    
+    return <span className="font-mono text-sm break-words">{String(value)}</span>
   }
 
   const formatValue = (value, key = '') => {
     if (value === undefined) return '—'
     if (value === null) return 'null'
     if (typeof value === 'boolean') return value ? 'true' : 'false'
-    
-    // Special formatting for JSON configs
-    if (key === 'screenFeedsConfig' || key === 'appUnitsConfig' || key === 'specialOffersAppFeedGUIDs') {
-      try {
-        const parsed = parseEmbeddedJSON(value)
-        return JSON.stringify(parsed, null, 2)
-      } catch {
-        return String(value)
-      }
-    }
-    
     if (typeof value === 'object') return JSON.stringify(value)
-    
-    // Truncate very long strings for display
-    const strValue = String(value)
-    if (strValue.length > 100) {
-      return strValue.substring(0, 100) + '...'
-    }
-    return strValue
+    return String(value)
   }
 
   const exportToJSON = () => {
@@ -689,8 +814,20 @@ function App() {
                       )}
                       
                       <button
+                        onClick={() => {
+                          setCdConfigFeed(feed.id)
+                          setEditCdParams(feed.cdParams || {l: '', af: '', src: '', sis: '', rt: ''})
+                        }}
+                        className="p-2 text-purple-600 hover:bg-purple-100 rounded-lg transition-colors"
+                        title="Edit CD Parameters"
+                      >
+                        <Settings size={18} />
+                      </button>
+                      
+                      <button
                         onClick={() => removeFeed(feed.id)}
                         className="p-2 text-red-600 hover:bg-red-100 rounded-lg transition-colors"
+                        title="Remove Feed"
                       >
                         <Trash2 size={18} />
                       </button>
@@ -860,40 +997,6 @@ function App() {
               </div>
             </div>
 
-            {/* Feed IDs Summary (if screenFeedsConfig differs) */}
-            {filteredDifferences.some(d => d.key === 'screenFeedsConfig' && d.detailedDiff?.feedComparison) && (
-              <div className="mb-4 bg-orange-50 border-l-4 border-orange-500 rounded-lg p-4 shadow-sm">
-                <h3 className="font-bold text-orange-900 mb-2 flex items-center gap-2">
-                  <span className="text-xl">🔄</span>
-                  Feed IDs Analysis
-                </h3>
-                {filteredDifferences
-                  .filter(d => d.key === 'screenFeedsConfig' && d.detailedDiff?.feedComparison)
-                  .map((diff, idx) => {
-                    const comparison = diff.detailedDiff.feedComparison
-                    return (
-                      <div key={idx} className="text-orange-900">
-                        <p className="font-semibold mb-1">
-                          📊 {comparison.summary}
-                        </p>
-                        <div className="text-sm space-y-1">
-                          <p>• Feed ID Count: {comparison.feedIds.map(ids => ids.length).join(', ')}</p>
-                          {!comparison.sameLengths && (
-                            <p className="text-red-700 font-medium">⚠️ Different number of Feed IDs between feeds</p>
-                          )}
-                          {comparison.sameIDs && !comparison.sameOrder && (
-                            <p className="text-yellow-700 font-medium">⚠️ Same Feed IDs but in different order</p>
-                          )}
-                          {!comparison.sameIDs && (
-                            <p className="text-red-700 font-medium">⚠️ Completely different Feed IDs</p>
-                          )}
-                        </div>
-                      </div>
-                    )
-                  })}
-              </div>
-            )}
-
             {/* Search */}
             <div className="mb-4 relative">
               <Search className="absolute left-3 top-3 text-gray-400" size={20} />
@@ -941,14 +1044,31 @@ function App() {
                       key={index}
                       className={cn(
                         "hover:bg-gray-50 transition-colors",
-                        index % 2 === 0 ? "bg-white" : "bg-gray-50"
+                        diff.isSummary ? "bg-blue-50" : index % 2 === 0 ? "bg-white" : "bg-gray-50"
                       )}
                     >
-                      <td className="border border-gray-300 px-4 py-3 font-mono text-sm text-gray-800 text-left">
+                      <td className={cn(
+                        "border border-gray-300 px-4 py-3 font-mono text-sm text-left",
+                        diff.isSummary ? "font-bold text-blue-900" : "text-gray-800"
+                      )}>
                         {diff.key}
                       </td>
                       <td className="border border-gray-300 px-4 py-3 text-center">
-                        {diff.type === 'missing' ? (
+                        {diff.isSummary ? (
+                          diff.summaryData.allSameOrder ? (
+                            <span className="inline-block px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-medium">
+                              ✅ Identical
+                            </span>
+                          ) : diff.summaryData.allSameIds ? (
+                            <span className="inline-block px-3 py-1 bg-yellow-100 text-yellow-700 rounded-full text-xs font-medium">
+                              ⚠️ Different Order
+                            </span>
+                          ) : (
+                            <span className="inline-block px-3 py-1 bg-red-100 text-red-700 rounded-full text-xs font-medium">
+                              🔴 Different Feeds
+                            </span>
+                          )
+                        ) : diff.type === 'missing' ? (
                           <span className="inline-block px-3 py-1 bg-red-100 text-red-700 rounded-full text-xs font-medium">
                             🔴 Missing
                           </span>
@@ -963,53 +1083,32 @@ function App() {
                           key={vIndex}
                           className={cn(
                             "border border-gray-300 px-4 py-3",
+                            diff.isSummary ? "bg-blue-50" :
                             !v.exists ? "bg-red-50 text-red-700" : 
                             diff.type === 'different' ? "bg-yellow-50" : ""
                           )}
                         >
-                          {v.exists ? (
-                            <div className="text-left">
-                              {diff.key === 'screenFeedsConfig' && diff.detailedDiff?.feedComparison ? (
-                                <div className="space-y-3">
-                                  {/* Feed IDs Only - Clean Display */}
-                                  <div className="bg-white border-2 border-blue-300 rounded-lg p-4">
-                                    <div className="font-bold text-blue-900 mb-3 text-base flex items-center gap-2">
-                                      <span>🎯</span>
-                                      <span>Feed IDs</span>
-                                      <span className="text-sm font-normal text-gray-600">({diff.detailedDiff.feedComparison.feedIds[vIndex].length} feeds)</span>
-                                    </div>
-                                    <div className="space-y-2">
-                                      {diff.detailedDiff.feedComparison.feedIds[vIndex].map((feedId, idx) => (
-                                        <div key={idx} className="flex items-start gap-3 bg-blue-50 p-3 rounded-lg border border-blue-200">
-                                          <div className="flex-shrink-0 w-8 h-8 bg-blue-600 text-white rounded-full flex items-center justify-center font-bold text-sm">
-                                            {idx + 1}
-                                          </div>
-                                          <div className="flex-1 font-mono text-sm break-all pt-1">
-                                            {feedId}
-                                          </div>
-                                        </div>
-                                      ))}
-                                    </div>
+                          {diff.isSummary ? (
+                            <div className="space-y-2">
+                              <div className="font-semibold text-blue-900 text-sm flex items-center gap-2">
+                                <span>📊 {v.count} Feeds</span>
+                              </div>
+                              <div className="space-y-1">
+                                {v.value.map((feedId, idx) => (
+                                  <div key={idx} className="flex items-center gap-2 text-xs">
+                                    <span className="flex-shrink-0 w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center font-bold">
+                                      {idx + 1}
+                                    </span>
+                                    <span className="font-mono text-gray-700 break-all">
+                                      {feedId}
+                                    </span>
                                   </div>
-                                  {/* Full JSON (collapsed) */}
-                                  <details className="cursor-pointer">
-                                    <summary className="text-xs text-gray-500 hover:text-gray-700 select-none underline">
-                                      👁️ Show additional info (screenId, toolbarTitleId, etc.)
-                                    </summary>
-                                    <pre className="font-mono text-xs whitespace-pre-wrap max-h-40 overflow-y-auto bg-gray-900 text-green-400 p-3 rounded mt-2">
-                                      {formatValue(v.value, diff.key)}
-                                    </pre>
-                                  </details>
-                                </div>
-                              ) : (diff.key === 'appUnitsConfig' || diff.key === 'specialOffersAppFeedGUIDs') ? (
-                                <pre className="font-mono text-xs whitespace-pre-wrap max-h-60 overflow-y-auto bg-gray-900 text-green-400 p-3 rounded">
-                                  {formatValue(v.value, diff.key)}
-                                </pre>
-                              ) : (
-                                <span className="font-mono text-sm break-words">
-                                  {formatValue(v.value, diff.key)}
-                                </span>
-                              )}
+                                ))}
+                              </div>
+                            </div>
+                          ) : v.exists ? (
+                            <div className="text-left">
+                              {renderValue(v.value, diff.propertyKey || diff.key)}
                             </div>
                           ) : (
                             <div className="text-center">
@@ -1056,6 +1155,153 @@ function App() {
             <p className="text-blue-800 text-base">
               💡 <strong>Next Steps:</strong> Add at least 2 feeds, click "Fetch All Feeds", then "Compare Feeds & Show Differences"
             </p>
+          </div>
+        )}
+
+        {/* Edit CD Parameters Modal */}
+        {cdConfigFeed && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+              <div className="sticky top-0 bg-white border-b border-gray-200 p-6 flex justify-between items-center">
+                <div>
+                  <h3 className="text-xl font-bold text-gray-800">Edit CD Parameters</h3>
+                  <p className="text-sm text-gray-600 mt-1">
+                    Feed: <code className="bg-gray-100 px-2 py-0.5 rounded text-xs">
+                      {feeds.find(f => f.id === cdConfigFeed)?.feedId}
+                    </code>
+                  </p>
+                </div>
+                <button
+                  onClick={() => setCdConfigFeed(null)}
+                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="p-6 space-y-4">
+                <p className="text-sm text-gray-600">
+                  Modify the CD parameters and click "Save & Refetch" to update and reload this feed.
+                </p>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {/* Locale */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Locale (l)
+                    </label>
+                    <select
+                      value={editCdParams.l}
+                      onChange={(e) => setEditCdParams({...editCdParams, l: e.target.value})}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    >
+                      <option value="">-- Default --</option>
+                      {Object.entries(LOCALES).map(([code, name]) => (
+                        <option key={code} value={code}>{name} ({code})</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Feature */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Feature (af)
+                    </label>
+                    <select
+                      value={editCdParams.af}
+                      onChange={(e) => setEditCdParams({...editCdParams, af: e.target.value})}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    >
+                      <option value="">-- Default --</option>
+                      {FEATURES.map(feature => (
+                        <option key={feature} value={feature}>{feature}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Source */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Source (src)
+                    </label>
+                    <input
+                      type="text"
+                      value={editCdParams.src}
+                      onChange={(e) => setEditCdParams({...editCdParams, src: e.target.value})}
+                      placeholder="e.g., FOTA"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    />
+                  </div>
+
+                  {/* SIS */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      SIS (sis)
+                    </label>
+                    <select
+                      value={editCdParams.sis}
+                      onChange={(e) => setEditCdParams({...editCdParams, sis: e.target.value})}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    >
+                      <option value="">-- Default --</option>
+                      <option value="true">true</option>
+                      <option value="false">false</option>
+                    </select>
+                  </div>
+
+                  {/* RT */}
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      RT (rt)
+                    </label>
+                    <select
+                      value={editCdParams.rt}
+                      onChange={(e) => setEditCdParams({...editCdParams, rt: e.target.value})}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent"
+                    >
+                      <option value="">-- Default --</option>
+                      <option value="true">true</option>
+                      <option value="false">false</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Preview */}
+                {Object.values(editCdParams).some(v => v !== '') && (
+                  <div className="mt-4 p-3 bg-purple-50 rounded-lg border border-purple-200">
+                    <p className="text-sm font-medium text-purple-800 mb-2">Preview:</p>
+                    <pre className="text-xs font-mono text-purple-900 whitespace-pre-wrap">
+                      {JSON.stringify(
+                        Object.entries(editCdParams).reduce((acc, [key, value]) => {
+                          if (value !== '') {
+                            acc[key] = key === 'sis' || key === 'rt' ? value === 'true' : value;
+                          }
+                          return acc;
+                        }, {}),
+                        null,
+                        2
+                      )}
+                    </pre>
+                  </div>
+                )}
+              </div>
+
+              <div className="sticky bottom-0 bg-gray-50 border-t border-gray-200 p-6 flex justify-end gap-3">
+                <button
+                  onClick={() => setCdConfigFeed(null)}
+                  className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-100 transition-colors font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={saveCdParametersAndRefetch}
+                  className="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium flex items-center gap-2"
+                >
+                  <Settings size={18} />
+                  Save & Refetch
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
